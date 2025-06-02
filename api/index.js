@@ -13,10 +13,22 @@ const Redis = require('ioredis');
 const app = express();
 
 // Inisialisasi Redis client dengan URL dari variabel lingkungan
-const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
+// Redis configuration dengan SSL support
+const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
+  // Add SSL config untuk Upstash
+  tls: process.env.REDIS_URL?.includes('rediss://') ? {} : undefined,
+  retryDelayOnFailover: 100,
+  maxRetriesPerRequest: 3,
+});
 
-console.log("Connecting to Redis URL:", process.env.REDIS_URL ? "Using REDIS_URL from env" : "Using localhost fallback");
+// Add connection event listeners
+redis.on('connect', () => {
+  console.log('✅ Redis connected successfully to Upstash');
+});
 
+redis.on('error', (err) => {
+  console.error('❌ Redis connection error:', err);
+});
 // Middlewares
 app.use(cors({
   origin: '*',
