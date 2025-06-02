@@ -3,6 +3,7 @@
 if (process.env.NODE_ENV !== 'production') {
   require('dotenv').config();
 }
+console.log("api testing")
 
 const express = require('express');
 const cors = require('cors');

@@ -1,4 +1,5 @@
 // public/script.js
+console.log("testing")
 $(document).ready(function () {
   // Set minimum date untuk date picker
   const today = new Date();
