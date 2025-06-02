@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Countdown Timer Admin</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+  <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/id.js"></script>
+</head>
+<body>
+  <div class="container">
+    <h1>Countdown Timer Admin</h1>
+    
+    <div class="tabs">
+      <button class="tab-button active" data-tab="manual-tab">Timer Manual</button>
+      <button class="tab-button" data-tab="schedule-tab">Timer Terjadwal</button>
+    </div>
+    
+    <div class="tab-content">
+      <!-- Tab Timer Manual -->
+      <div id="manual-tab" class="tab-pane active">
+        <div class="input-section">
+          <input type="number" id="hoursInput" placeholder="Masukkan jam" min="1">
+          <button id="setTimerBtn">Set Timer</button>
+        </div>
+      </div>
+      
+      <!-- Tab Timer Terjadwal -->
+      <div id="schedule-tab" class="tab-pane">
+        <div class="schedule-form">
+          <div class="form-group">
+            <label for="startDate">Tanggal Mulai:</label>
+            <input type="date" id="startDate" class="form-control">
+          </div>
+          <div class="form-group">
+            <label for="startTime">Waktu Mulai:</label>
+            <input type="time" id="startTime" class="form-control">
+          </div>
+          <div class="form-group">
+            <label for="duration">Durasi (jam):</label>
+            <input type="number" id="duration" class="form-control" min="1" placeholder="Masukkan durasi dalam jam">
+          </div>
+          <button id="scheduleTimerBtn" class="full-width-btn">Jadwalkan Timer</button>
+        </div>
+        
+        <div class="schedules-section">
+          <h3>Timer Terjadwal</h3>
+          <div class="schedule-info-box">
+            <div class="info-item">
+              <div class="info-dot pending"></div>
+              <span>Menunggu</span>
+            </div>
+            <div class="info-item">
+              <div class="info-dot activated"></div>
+              <span>Aktif</span>
+            </div>
+            <div class="info-item">
+              <div class="info-dot expired"></div>
+              <span>Terlewat</span>
+            </div>
+            <div class="info-item">
+              <div class="info-dot completed"></div>
+              <span>Selesai</span>
+            </div>
+          </div>
+          <div id="schedulesList" class="schedules-list">
+            <div class="loading">Memuat jadwal...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <div class="timer-section">
+      <h2>Status Timer:</h2>
+      <div class="timer">
+        <div class="timer-item">
+          <div id="hours">00</div>
+          <span>jam</span>
+        </div>
+        <div class="timer-separator">:</div>
+        <div class="timer-item">
+          <div id="minutes">00</div>
+          <span>menit</span>
+        </div>
+        <div class="timer-separator">:</div>
+        <div class="timer-item">
+          <div id="seconds">00</div>
+          <span>detik</span>
+        </div>
+      </div>
+    </div>
+    
+    <div class="api-section">
+      <h2>API Endpoint:</h2>
+      <div class="api-url-container">
+        <input type="text" id="apiUrl" readonly>
+        <button id="copyBtn">Salin</button>
+      </div>
+    </div>
+  </div>
+  
+  <script src="script.js"></script>
+</body>
+</html>
