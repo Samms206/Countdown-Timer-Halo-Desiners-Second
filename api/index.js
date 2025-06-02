@@ -1,86 +1,126 @@
-//api/index.js
+// api/index.js - Versi Simple
 
+// Load environment variables untuk development
 if (process.env.NODE_ENV !== 'production') {
   require('dotenv').config();
 }
-console.log("api testing")
+
+console.log("=== Timer API Starting ===");
 
 const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
-const Redis = require('ioredis');
 
 const app = express();
-const redisConfig = {
-  maxRetriesPerRequest: 3,
-  retryDelayOnFailover: 100,
-  enableReadyCheck: false,
-  maxLoadTimeout: 10000,
-  lazyConnect: true
-};
 
-
-if (process.env.REDIS_URL?.includes('rediss://')) {
-  redisConfig.tls = {};
-}
-
-console.log('Connecting to Redis with URL:', process.env.REDIS_URL ? 'URL provided' : 'No URL found');
-
-const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', redisConfig);
-
-
-redis.on('connect', () => {
-  console.log('✅ Redis connected successfully');
-});
-
-redis.on('ready', () => {
-  console.log('✅ Redis ready to receive commands');
-});
-
-redis.on('error', (err) => {
-  console.error('❌ Redis connection error:', err.message);
-});
-
+// Middleware
 app.use(cors({
   origin: '*',
   methods: ['GET', 'POST', 'OPTIONS', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-
-app.use(function(req, res, next) {
-  res.header("Access-Control-Allow-Origin", "*");
-  res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
-  res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS, DELETE");
-  
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
-  next();
-});
-
 app.use(bodyParser.json());
+
+// Serve static files dari folder public
 app.use(express.static(path.join(__dirname, '../public')));
 
+// Debug Environment Variables
+console.log("Environment Check:");
+console.log("- NODE_ENV:", process.env.NODE_ENV);
+console.log("- REDIS_URL:", !!process.env.REDIS_URL);
+console.log("- UPSTASH_REST_URL:", !!process.env.UPSTASH_REDIS_REST_URL);
+console.log("- UPSTASH_REST_TOKEN:", !!process.env.UPSTASH_REDIS_REST_TOKEN);
+
+// Upstash REST API Client (Simple)
+class SimpleRedis {
+  constructor() {
+    this.baseURL = process.env.UPSTASH_REDIS_REST_URL;
+    this.token = process.env.UPSTASH_REDIS_REST_TOKEN;
+    
+    if (!this.baseURL || !this.token) {
+      console.error("❌ Upstash credentials missing!");
+      throw new Error("Redis credentials not configured");
+    }
+    
+    console.log("✅ Redis client initialized");
+  }
+
+  async request(command) {
+    try {
+      const response = await fetch(this.baseURL, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(command)
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Redis error: ${response.status}`);
+      }
+      
+      const result = await response.json();
+      return result;
+    } catch (error) {
+      console.error("Redis request failed:", error.message);
+      throw error;
+    }
+  }
+
+  async get(key) {
+    const result = await this.request(['GET', key]);
+    return result.result;
+  }
+
+  async set(key, value) {
+    const result = await this.request(['SET', key, value]);
+    return result.result;
+  }
+
+  async ping() {
+    const result = await this.request(['PING']);
+    return result.result;
+  }
+}
+
+// Initialize Redis
+let redis;
+try {
+  redis = new SimpleRedis();
+} catch (error) {
+  console.error("Failed to initialize Redis:", error.message);
+  // Mock Redis untuk fallback
+  redis = {
+    get: async () => null,
+    set: async () => 'OK',
+    ping: async () => 'PONG (mock)'
+  };
+}
+
+// Constants
 const TIMER_KEY = 'timer_data_second';
+
+// Helper Functions
 async function getData() {
-  try {  
+  try {
     const dataStr = await redis.get(TIMER_KEY);
+    
     if (!dataStr) {
       const defaultData = { 
         endTime: null,
         scheduledTimers: []
-      };  
+      };
       await redis.set(TIMER_KEY, JSON.stringify(defaultData));
       return defaultData;
     }
     
     return JSON.parse(dataStr);
   } catch (error) {
-    console.error('Error getting data from Redis:', error);
-    
+    console.error('Error getting data:', error.message);
     return { 
       endTime: null,
       scheduledTimers: []
@@ -93,137 +133,117 @@ async function saveData(data) {
     await redis.set(TIMER_KEY, JSON.stringify(data));
     return true;
   } catch (error) {
-    console.error('Error saving data to Redis:', error);
+    console.error('Error saving data:', error.message);
     return false;
   }
 }
 
+// === ENDPOINTS ===
 
-app.get('/api/timer', async (req, res) => {
+// Health Check (Simple)
+app.get('/health', async (req, res) => {
   try {
-    console.log('Timer status request received');
+    const pingResult = await redis.ping();
     const data = await getData();
     
+    res.json({ 
+      status: 'OK',
+      timestamp: new Date().toISOString(),
+      redis: pingResult,
+      timerActive: !!data.endTime,
+      scheduledCount: data.scheduledTimers?.length || 0
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      status: 'ERROR',
+      error: error.message
+    });
+  }
+});
+
+// Debug Endpoint (Simple)
+app.get('/debug', async (req, res) => {
+  try {
+    const pingResult = await redis.ping();
+    const data = await getData();
     
+    res.json({
+      environment: {
+        nodeEnv: process.env.NODE_ENV,
+        hasRedisUrl: !!process.env.REDIS_URL,
+        hasUpstashUrl: !!process.env.UPSTASH_REDIS_REST_URL,
+        hasUpstashToken: !!process.env.UPSTASH_REDIS_REST_TOKEN
+      },
+      redis: {
+        ping: pingResult,
+        status: 'connected'
+      },
+      data: {
+        timerActive: !!data.endTime,
+        scheduledTimers: data.scheduledTimers?.length || 0
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: error.message,
+      environment: {
+        nodeEnv: process.env.NODE_ENV,
+        hasRedisUrl: !!process.env.REDIS_URL,
+        hasUpstashUrl: !!process.env.UPSTASH_REDIS_REST_URL,
+        hasUpstashToken: !!process.env.UPSTASH_REDIS_REST_TOKEN
+      }
+    });
+  }
+});
+
+// Get Timer Status
+app.get('/api/timer', async (req, res) => {
+  try {
+    const data = await getData();
     const now = Date.now();
-    let dataModified = false;
     
+    // Process scheduled timers
     if (data.scheduledTimers && data.scheduledTimers.length > 0) {
+      let dataModified = false;
       
       for (let i = 0; i < data.scheduledTimers.length; i++) {
         const schedule = data.scheduledTimers[i];
         
-        (status)
-        if (schedule.status === undefined) {
-          if (schedule.active === true) {
-            data.scheduledTimers[i].status = 'activated';
-            data.scheduledTimers[i].activatedAt = now - 5000; 
-          } else {
-            if (schedule.startAt <= now) {
-              
-              data.scheduledTimers[i].status = 'expired';
-              data.scheduledTimers[i].expiredAt = now;
-            } else {
-              
-              data.scheduledTimers[i].status = 'pending';
-            }
-          }
-          dataModified = true;
-          console.log(`Migrated schedule ${schedule.id} to new format with status: ${data.scheduledTimers[i].status}`);
-        }
-        
-        
-        if (schedule.status === 'expired' || schedule.status === 'completed') {
-          continue;
-        }
-        
-        if (schedule.status === 'pending' && schedule.startAt <= now - (24 * 60 * 60 * 1000)) {
-          console.log(`Marking very old schedule ${schedule.id} as expired`);
-          data.scheduledTimers[i].status = 'expired';
-          data.scheduledTimers[i].expiredAt = now;
-          dataModified = true;
-          continue;
-        }
-        
-        completed
-        if (schedule.status === 'activated' && data.endTime && now >= data.endTime) {
-          console.log(`Marking activated schedule ${schedule.id} as completed`);
-          data.scheduledTimers[i].status = 'completed';
-          data.scheduledTimers[i].completedAt = now;
-          dataModified = true;
-          continue;
-        }
-        
-        
-        
+        // Activate pending timers
         if (schedule.status === 'pending' && schedule.startAt <= now) {
-          console.log(`Activating scheduled timer ${schedule.id}`);
+          console.log(`Activating timer ${schedule.id}`);
           
-          
-          if (data.endTime) {
-            const oldEndTime = new Date(data.endTime).toISOString();
-            console.log(`Replacing existing timer that would end at ${oldEndTime}`);
-            
-            
-            for (let j = 0; j < data.scheduledTimers.length; j++) {
-              if (i !== j && data.scheduledTimers[j].status === 'activated') {
-                console.log(`Marking previously activated schedule ${data.scheduledTimers[j].id} as completed`);
-                data.scheduledTimers[j].status = 'completed';
-                data.scheduledTimers[j].completedAt = now;
-              }
-            }
-          }
-          
-          
+          // Set new end time
           const endTime = now + (schedule.duration * 60 * 60 * 1000);
           data.endTime = endTime;
           
-          
+          // Update status
           data.scheduledTimers[i].status = 'activated';
           data.scheduledTimers[i].activatedAt = now;
           dataModified = true;
         }
-      }
-      const originalLength = data.scheduledTimers.length;
-      data.scheduledTimers = data.scheduledTimers.filter(schedule => {
         
-        if (schedule.status === 'completed' && schedule.completedAt && (now - schedule.completedAt > 60000)) {
-          return false; 
+        // Mark completed timers
+        if (schedule.status === 'activated' && data.endTime && now >= data.endTime) {
+          data.scheduledTimers[i].status = 'completed';
+          data.scheduledTimers[i].completedAt = now;
+          dataModified = true;
         }
-        return true; 
-      });
+      }
       
-      if (data.scheduledTimers.length < originalLength) {
-        console.log(`Removed ${originalLength - data.scheduledTimers.length} completed schedules`);
-        dataModified = true;
+      // Save changes
+      if (dataModified) {
+        await saveData(data);
       }
     }
     
-    
-    if (dataModified) {
-      console.log('Saving modified data');
-      await saveData(data);
-    }
-    
-    
-    if (!data.endTime) {
-      console.log('No active timer found');
-      return res.json({ 
-        active: false,
-        hours: '00',
-        minutes: '00',
-        seconds: '00'
-      });
-    }
-    
-    const endTime = data.endTime;
-    
-    
-    if (now >= endTime) {
-      console.log('Timer has ended, resetting');
-      
-      data.endTime = null;
-      await saveData(data);
+    // Check if timer is active
+    if (!data.endTime || now >= data.endTime) {
+      // Reset if ended
+      if (data.endTime && now >= data.endTime) {
+        data.endTime = null;
+        await saveData(data);
+      }
       
       return res.json({ 
         active: false,
@@ -233,14 +253,13 @@ app.get('/api/timer', async (req, res) => {
       });
     }
     
-    
-    const remainingTime = endTime - now;
+    // Calculate remaining time
+    const remainingTime = data.endTime - now;
     const hours = Math.floor(remainingTime / (1000 * 60 * 60));
     const minutes = Math.floor((remainingTime % (1000 * 60 * 60)) / (1000 * 60));
     const seconds = Math.floor((remainingTime % (1000 * 60)) / 1000);
     
-    console.log(`Returning active timer: ${hours}h ${minutes}m ${seconds}s`);
-    return res.json({
+    res.json({
       active: true,
       hours: hours.toString().padStart(2, '0'),
       minutes: minutes.toString().padStart(2, '0'),
@@ -249,589 +268,212 @@ app.get('/api/timer', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('Error in timer status:', error);
+    console.error('Timer error:', error.message);
     res.status(500).json({ 
       error: 'Server error', 
-      details: error.message, 
-      stack: error.stack 
+      details: error.message
     });
   }
 });
 
-
+// Set Manual Timer
 app.post('/api/timer', async (req, res) => {
   try {
-    console.log('Manual timer update request received:', req.body);
     const { hours, password } = req.body;
     
-    
+    // Verify password
     if (password !== 'HDberkah2025') {
-      console.log('Password verification failed');
       return res.status(403).json({ error: 'Password salah' });
     }
     
-    
+    // Validate hours
     const hoursNum = parseInt(hours);
     if (isNaN(hoursNum) || hoursNum <= 0) {
-      console.log('Invalid hours value:', hours);
       return res.status(400).json({ error: 'Jam harus berupa angka positif' });
     }
     
-    console.log('Calculating end time for', hoursNum, 'hours');
-    
+    // Calculate end time
     const endTime = Date.now() + (hoursNum * 60 * 60 * 1000);
     
-    
+    // Save data
     const data = await getData();
     data.endTime = endTime;
     
-    
-    try {
-      console.log('Attempting to save data to Redis');
-      const saveResult = await saveData(data);
-      
-      if (!saveResult) {
-        throw new Error('Failed to save data to Redis');
-      }
-      
-      console.log('Write successful, endTime:', endTime);
-    } catch (redisError) {
-      console.error('Redis write error details:', redisError);
-      throw redisError;
+    const saveResult = await saveData(data);
+    if (!saveResult) {
+      throw new Error('Failed to save timer data');
     }
     
+    console.log(`Timer set for ${hoursNum} hours`);
     res.json({ success: true });
     
   } catch (error) {
-    console.error('Error in manual timer update:', error);
+    console.error('Set timer error:', error.message);
     res.status(500).json({ 
       error: 'Server error', 
-      details: error.message, 
-      stack: error.stack 
+      details: error.message
     });
   }
 });
 
-
-
+// Schedule Timer
 app.post('/api/schedule', async (req, res) => {
   try {
-    console.log('Schedule timer request received:', req.body);
-    const { timestamp, startDate, startTime, duration, password, timezone } = req.body;
+    const { timestamp, duration, password } = req.body;
     
-    
+    // Verify password
     if (password !== 'HDberkah2025') {
-      console.log('Password verification failed');
       return res.status(403).json({ error: 'Password salah' });
     }
     
-    
-    if (!duration) {
-      console.log('Missing required fields');
-      return res.status(400).json({ error: 'Durasi harus diisi' });
+    // Validate input
+    if (!duration || !timestamp) {
+      return res.status(400).json({ error: 'Durasi dan waktu harus diisi' });
     }
     
     const durationNum = parseInt(duration);
+    const startAt = parseInt(timestamp);
+    
     if (isNaN(durationNum) || durationNum <= 0) {
-      console.log('Invalid duration value:', duration);
       return res.status(400).json({ error: 'Durasi harus berupa angka positif' });
     }
     
-    
-    let startAt;
-    
-    if (timestamp && !isNaN(parseInt(timestamp))) {
-      
-      startAt = parseInt(timestamp);
-      console.log(`Using client timestamp: ${startAt}`);
-      console.log(`Equivalent to UTC: ${new Date(startAt).toUTCString()}`);
-      console.log(`Equivalent to ISO: ${new Date(startAt).toISOString()}`);
-    } 
-    else if (startDate && startTime) {
-      
-      console.log('No timestamp provided, using date components');
-      
-      
-      const [year, month, day] = startDate.split('-').map(Number);
-      const [hours, minutes] = startTime.split(':').map(Number);
-      
-      
-      const timezoneOffset = timezone !== undefined ? parseInt(timezone) : 0;
-      
-      
-
-      const offsetHours = Math.floor(Math.abs(timezoneOffset) / 60);
-      const offsetMinutes = Math.abs(timezoneOffset) % 60;
-
-
-      let utcHours, utcMinutes;
-      
-      if (timezoneOffset <= 0) {
-        
-        utcHours = hours - offsetHours;
-        utcMinutes = minutes - offsetMinutes;
-      } else {
-        
-        utcHours = hours + offsetHours;
-        utcMinutes = minutes + offsetMinutes;
-      }
-      
-      
-      while (utcMinutes < 0) { utcMinutes += 60; utcHours -= 1; }
-      while (utcMinutes >= 60) { utcMinutes -= 60; utcHours += 1; }
-      
-      let utcDay = day;
-      let utcMonth = month - 1;
-      let utcYear = year;
-      
-      
-      while (utcHours < 0) { utcHours += 24; utcDay -= 1; }
-      while (utcHours >= 24) { utcHours -= 24; utcDay += 1; }
-      
-      
-      startAt = Date.UTC(utcYear, utcMonth, utcDay, utcHours, utcMinutes, 0, 0);
-      
-      console.log(`Computed UTC timestamp from components: ${startAt}`);
-      console.log(`Equivalent to: ${new Date(startAt).toISOString()}`);
-    }
-    else {
-      return res.status(400).json({ error: 'Data waktu tidak lengkap' });
-    }
-    
-    
     if (startAt <= Date.now()) {
-      return res.status(400).json({ error: 'Tanggal dan waktu harus di masa depan' });
+      return res.status(400).json({ error: 'Waktu harus di masa depan' });
     }
     
-    
-    console.log('DEBUG INFO:');
-    console.log(`Input date/time: ${startDate} ${startTime}`);
-    console.log(`Client timezone offset: ${timezone} minutes`);
-    console.log(`Final startAt timestamp: ${startAt}`);
-    console.log(`Final startAt UTC: ${new Date(startAt).toUTCString()}`);
-    console.log(`Final startAt ISO: ${new Date(startAt).toISOString()}`);
-    console.log(`Final startAt local server time: ${new Date(startAt).toString()}`);
-    console.log(`Duration: ${durationNum} hours`);
-    
-    
+    // Save schedule
     const data = await getData();
-    
-    
     if (!data.scheduledTimers) {
       data.scheduledTimers = [];
     }
     
-    
     const newSchedule = {
       id: uuidv4(),
       startAt: startAt,
-      
-      timestamp: startAt,
       duration: durationNum,
       status: 'pending',
-      createdAt: Date.now(),
-      
-      rawDate: startDate,
-      rawTime: startTime,
-      timezoneOffset: timezone
+      createdAt: Date.now()
     };
     
     data.scheduledTimers.push(newSchedule);
     
-    
     const saveResult = await saveData(data);
-    
     if (!saveResult) {
-      throw new Error('Failed to save schedule data to Redis');
+      throw new Error('Failed to save schedule');
     }
     
-    console.log('Schedule saved successfully:', newSchedule);
-    
-    
+    console.log('Schedule created:', newSchedule.id);
     res.json({
       success: true,
-      savedTimestamp: startAt,
-      savedTime: new Date(startAt).toISOString(),
       schedule: newSchedule
     });
     
   } catch (error) {
-    console.error('Error in schedule creation:', error);
+    console.error('Schedule error:', error.message);
     res.status(500).json({ 
       error: 'Server error', 
-      details: error.message, 
-      stack: error.stack 
+      details: error.message
     });
   }
 });
 
-
+// Get Schedules
 app.get('/api/schedules', async (req, res) => {
   try {
-    console.log('Fetching schedules');
-    
     const data = await getData();
-    
-    
-    const now = Date.now();
-    
-    
-    let dataModified = false;
-    if (data.scheduledTimers) {
-      for (let i = 0; i < data.scheduledTimers.length; i++) {
-        const schedule = data.scheduledTimers[i];
-        
-        
-        if (schedule.status === undefined) {
-          if (schedule.active === true) {
-            schedule.status = 'activated';
-            dataModified = true;
-          } else if (schedule.startAt <= now) {
-            
-            if (now - schedule.startAt < 24 * 60 * 60 * 1000) {
-              
-              console.log(`Activating pending schedule ${schedule.id} from /api/schedules`);
-              
-              
-              const endTime = now + (schedule.duration * 60 * 60 * 1000);
-              data.endTime = endTime;
-              
-              schedule.status = 'activated';
-              schedule.activatedAt = now;
-            } else {
-              
-              schedule.status = 'expired';
-            }
-            dataModified = true;
-          } else {
-            schedule.status = 'pending';
-            dataModified = true;
-          }
-        }
-        
-        else if (schedule.status === 'pending' && schedule.startAt <= now) {
-          
-          if (now - schedule.startAt < 24 * 60 * 60 * 1000) {
-            console.log(`Activating pending schedule ${schedule.id} from /api/schedules`);
-            
-            
-            if (data.endTime) {
-              const oldEndTime = new Date(data.endTime).toISOString();
-              console.log(`Replacing existing timer that would end at ${oldEndTime}`);
-              
-              
-              for (let j = 0; j < data.scheduledTimers.length; j++) {
-                if (i !== j && data.scheduledTimers[j].status === 'activated') {
-                  console.log(`Marking previously activated schedule ${data.scheduledTimers[j].id} as completed`);
-                  data.scheduledTimers[j].status = 'completed';
-                  data.scheduledTimers[j].completedAt = now;
-                }
-              }
-            }
-            
-            
-            const endTime = now + (schedule.duration * 60 * 60 * 1000);
-            data.endTime = endTime;
-            
-            schedule.status = 'activated';
-            schedule.activatedAt = now;
-            dataModified = true;
-          } else {
-            
-            schedule.status = 'expired';
-            schedule.expiredAt = now;
-            dataModified = true;
-            console.log(`Marking very old schedule ${schedule.id} as expired from /api/schedules`);
-          }
-        }
-      }
-    }
-    
-    
-    if (dataModified) {
-      console.log('Saving modified data from /api/schedules');
-      await saveData(data);
-    }
     
     const activeSchedules = (data.scheduledTimers || [])
       .filter(schedule => schedule.status !== 'completed')
       .sort((a, b) => a.startAt - b.startAt);
     
-    console.log(`Returning ${activeSchedules.length} active schedules`);
     res.json({ schedules: activeSchedules });
     
   } catch (error) {
-    console.error('Error fetching schedules:', error);
+    console.error('Get schedules error:', error.message);
     res.status(500).json({ 
       error: 'Server error', 
-      details: error.message, 
-      stack: error.stack,
+      details: error.message,
       schedules: []
     });
   }
 });
 
-
+// Delete Schedule
 app.delete('/api/schedule/:id', async (req, res) => {
   try {
-    console.log(`Delete schedule request for ID: ${req.params.id}`);
     const { password } = req.query;
+    const scheduleId = req.params.id;
     
-    
+    // Verify password
     if (password !== 'HDberkah2025') {
-      console.log('Password verification failed');
       return res.status(403).json({ error: 'Password salah' });
     }
     
-    const scheduleId = req.params.id;
-    
-    
+    // Delete schedule
     const data = await getData();
-    
     
     if (data.scheduledTimers) {
       const originalLength = data.scheduledTimers.length;
       data.scheduledTimers = data.scheduledTimers.filter(schedule => schedule.id !== scheduleId);
       
       if (data.scheduledTimers.length < originalLength) {
-        
         const saveResult = await saveData(data);
-        
         if (!saveResult) {
-          throw new Error('Failed to save updated schedule data to Redis');
+          throw new Error('Failed to save updated data');
         }
         
-        console.log(`Schedule ${scheduleId} deleted successfully`);
+        console.log(`Schedule ${scheduleId} deleted`);
         return res.json({ success: true });
       }
     }
     
-    console.log(`Schedule ${scheduleId} not found`);
-    return res.status(404).json({ error: 'Jadwal tidak ditemukan' });
+    res.status(404).json({ error: 'Jadwal tidak ditemukan' });
     
   } catch (error) {
-    console.error('Error deleting schedule:', error);
+    console.error('Delete schedule error:', error.message);
     res.status(500).json({ 
       error: 'Server error', 
-      details: error.message, 
-      stack: error.stack 
+      details: error.message
     });
   }
 });
 
-
-
-app.get('/health', async (req, res) => {
-  try {
-    
-    await redis.ping();
-    
-    
-    const redisInfo = await redis.info();
-    const redisConfig = redis.options;
-    
-    
-    const allKeys = await redis.keys('*');
-    
-    
-    const timerData = await getData();
-    
-    
-    const memoryInfo = await redis.info('memory');
-    
-    
-    const serverInfo = await redis.info('server');
-    
-    
-    const clientInfo = await redis.info('clients');
-    
-    
-    const dbSize = await redis.dbsize();
-    
-    
-    const keyInfo = {};
-    for (const key of allKeys) {
-      try {
-        const type = await redis.type(key);
-        const ttl = await redis.ttl(key);
-        const size = await redis.memory('usage', key);
-        
-        keyInfo[key] = {
-          type: type,
-          ttl: ttl === -1 ? 'no expiry' : `${ttl} seconds`,
-          memoryUsage: `${size} bytes`,
-          exists: await redis.exists(key)
-        };
-        
-        
-        if (key === TIMER_KEY) {
-          keyInfo[key].data = await redis.get(key);
-          try {
-            keyInfo[key].parsedData = JSON.parse(keyInfo[key].data);
-          } catch (e) {
-            keyInfo[key].parseError = e.message;
-          }
-        }
-      } catch (keyError) {
-        keyInfo[key] = { error: keyError.message };
-      }
-    }
-    
-    
-    const parseRedisInfo = (infoString) => {
-      const lines = infoString.split('\r\n');
-      const result = {};
-      let currentSection = 'general';
-      
-      for (const line of lines) {
-        if (line.startsWith('# ')) {
-          currentSection = line.substring(2).toLowerCase();
-          result[currentSection] = {};
-        } else if (line.includes(':')) {
-          const [key, value] = line.split(':');
-          if (!result[currentSection]) result[currentSection] = {};
-          result[currentSection][key] = value;
-        }
-      }
-      return result;
-    };
-    
-    const parsedRedisInfo = parseRedisInfo(redisInfo);
-    const parsedMemoryInfo = parseRedisInfo(memoryInfo);
-    const parsedServerInfo = parseRedisInfo(serverInfo);
-    const parsedClientInfo = parseRedisInfo(clientInfo);
-    
-    res.json({ 
-      status: 'OK',
-      timestamp: new Date().toISOString(),
-      
-      
-      environment: {
-        nodeEnv: process.env.NODE_ENV,
-        port: process.env.PORT,
-        redisUrl: process.env.REDIS_URL ? 'configured' : 'not configured',
-        redisUrlType: process.env.REDIS_URL?.includes('rediss://') ? 'secure (TLS)' : 'standard'
-      },
-      
-      
-      redis: {
-        status: 'connected',
-        host: redisConfig.host,
-        port: redisConfig.port,
-        db: redisConfig.db || 0,
-        family: redisConfig.family,
-        connectTimeout: redisConfig.connectTimeout,
-        lazyConnect: redisConfig.lazyConnect,
-        maxRetriesPerRequest: redisConfig.maxRetriesPerRequest,
-        retryDelayOnFailover: redisConfig.retryDelayOnFailover,
-        enableReadyCheck: redisConfig.enableReadyCheck,
-        maxLoadTimeout: redisConfig.maxLoadTimeout
-      },
-      
-      
-      database: {
-        totalKeys: allKeys.length,
-        databaseSize: dbSize,
-        timerKey: TIMER_KEY,
-        allKeys: allKeys,
-        keyDetails: keyInfo
-      },
-      
-      
-      applicationData: {
-        timerData: timerData,
-        activeTimer: timerData.endTime ? {
-          endTime: timerData.endTime,
-          endTimeFormatted: new Date(timerData.endTime).toISOString(),
-          remainingMs: Math.max(0, timerData.endTime - Date.now()),
-          isActive: timerData.endTime > Date.now()
-        } : null,
-        scheduledTimers: {
-          total: timerData.scheduledTimers?.length || 0,
-          pending: timerData.scheduledTimers?.filter(s => s.status === 'pending').length || 0,
-          activated: timerData.scheduledTimers?.filter(s => s.status === 'activated').length || 0,
-          completed: timerData.scheduledTimers?.filter(s => s.status === 'completed').length || 0,
-          expired: timerData.scheduledTimers?.filter(s => s.status === 'expired').length || 0,
-          details: timerData.scheduledTimers || []
-        }
-      },
-      
-      
-      serverInfo: {
-        version: parsedServerInfo.server?.redis_version,
-        mode: parsedServerInfo.server?.redis_mode,
-        os: parsedServerInfo.server?.os,
-        arch: parsedServerInfo.server?.arch_bits,
-        multiplexingApi: parsedServerInfo.server?.multiplexing_api,
-        uptime: parsedServerInfo.server?.uptime_in_seconds,
-        uptimeHuman: parsedServerInfo.server?.uptime_in_days
-      },
-      
-      
-      memoryInfo: {
-        usedMemory: parsedMemoryInfo.memory?.used_memory,
-        usedMemoryHuman: parsedMemoryInfo.memory?.used_memory_human,
-        usedMemoryPeak: parsedMemoryInfo.memory?.used_memory_peak,
-        usedMemoryPeakHuman: parsedMemoryInfo.memory?.used_memory_peak_human,
-        totalSystemMemory: parsedMemoryInfo.memory?.total_system_memory,
-        totalSystemMemoryHuman: parsedMemoryInfo.memory?.total_system_memory_human,
-        maxMemory: parsedMemoryInfo.memory?.maxmemory,
-        maxMemoryHuman: parsedMemoryInfo.memory?.maxmemory_human
-      },
-      
-      
-      clientInfo: {
-        connectedClients: parsedClientInfo.clients?.connected_clients,
-        clientRecentMaxInputBuffer: parsedClientInfo.clients?.client_recent_max_input_buffer,
-        clientRecentMaxOutputBuffer: parsedClientInfo.clients?.client_recent_max_output_buffer
-      },
-      
-      
-      rawRedisInfo: {
-        full: parsedRedisInfo,
-        memory: parsedMemoryInfo,
-        server: parsedServerInfo,
-        clients: parsedClientInfo
-      }
-    });
-    
-  } catch (error) {
-    console.error('Health check failed:', error);
-    
-    
-    res.status(500).json({ 
-      status: 'ERROR',
-      timestamp: new Date().toISOString(),
-      error: error.message,
-      stack: error.stack,
-      
-      environment: {
-        nodeEnv: process.env.NODE_ENV,
-        port: process.env.PORT,
-        redisUrl: process.env.REDIS_URL ? 'configured' : 'not configured'
-      },
-      
-      redis: {
-        status: 'disconnected',
-        error: error.message
-      },
-      
-      database: {
-        status: 'unavailable',
-        timerKey: TIMER_KEY
-      }
-    });
-  }
+// Root endpoint
+app.get('/', (req, res) => {
+  res.json({
+    message: 'Timer API Server',
+    status: 'Running',
+    timestamp: new Date().toISOString(),
+    endpoints: [
+      'GET /test - Basic test',
+      'GET /debug - Environment check',
+      'GET /health - Health check',
+      'GET /api/timer - Timer status',
+      'POST /api/timer - Set timer',
+      'GET /api/schedules - Get schedules',
+      'POST /api/schedule - Create schedule',
+      'DELETE /api/schedule/:id - Delete schedule'
+    ]
+  });
 });
 
+// Test endpoint
+app.get('/test', (req, res) => {
+  res.json({
+    message: 'Server berjalan!',
+    timestamp: new Date().toISOString(),
+    status: 'OK'
+  });
+});
 
+// Start server (untuk development)
 if (process.env.NODE_ENV !== 'production') {
   const PORT = process.env.PORT || 3000;
   app.listen(PORT, () => {
-    console.log(`Server berjalan di port ${PORT}`);
+    console.log(`Server running on port ${PORT}`);
   });
 }
 
-
+// Export untuk Vercel
 module.exports = app;
-//end of api/index.js
