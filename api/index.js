@@ -1,3 +1,4 @@
+//api/index.js
 // Load environment variables for local development
 if (process.env.NODE_ENV !== 'production') {
   require('dotenv').config();
@@ -13,21 +14,35 @@ const Redis = require('ioredis');
 const app = express();
 
 // Inisialisasi Redis client dengan URL dari variabel lingkungan
-// Redis configuration dengan SSL support
-const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
-  // Add SSL config untuk Upstash
-  tls: process.env.REDIS_URL?.includes('rediss://') ? {} : undefined,
-  retryDelayOnFailover: 100,
+// Enhanced Redis configuration for Vercel + Upstash
+const redisConfig = {
   maxRetriesPerRequest: 3,
+  retryDelayOnFailover: 100,
+  enableReadyCheck: false,
+  maxLoadTimeout: 10000,
+  lazyConnect: true
+};
+
+// Add TLS config untuk Upstash
+if (process.env.REDIS_URL?.includes('rediss://')) {
+  redisConfig.tls = {};
+}
+
+console.log('Connecting to Redis with URL:', process.env.REDIS_URL ? 'URL provided' : 'No URL found');
+
+const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', redisConfig);
+
+// Enhanced Redis event listeners
+redis.on('connect', () => {
+  console.log('✅ Redis connected successfully');
 });
 
-// Add connection event listeners
-redis.on('connect', () => {
-  console.log('✅ Redis connected successfully to Upstash');
+redis.on('ready', () => {
+  console.log('✅ Redis ready to receive commands');
 });
 
 redis.on('error', (err) => {
-  console.error('❌ Redis connection error:', err);
+  console.error('❌ Redis connection error:', err.message);
 });
 // Middlewares
 app.use(cors({
@@ -52,7 +67,7 @@ app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, '../public')));
 
 // Kunci Redis
-const TIMER_KEY = 'timer_data';
+const TIMER_KEY = 'timer_data_second';
 
 // Fungsi helper untuk mendapatkan data
 async function getData() {
@@ -619,6 +634,29 @@ app.delete('/api/schedule/:id', async (req, res) => {
   }
 });
 
+// Add health check endpoint
+app.get('/health', async (req, res) => {
+  try {
+    // Test Redis connection
+    await redis.ping();
+    
+    res.json({ 
+      status: 'OK', 
+      timestamp: new Date().toISOString(),
+      redis: 'connected',
+      env: process.env.NODE_ENV,
+      timerKey: TIMER_KEY
+    });
+  } catch (error) {
+    console.error('Health check failed:', error);
+    res.status(500).json({ 
+      status: 'ERROR', 
+      error: error.message,
+      redis: 'disconnected'
+    });
+  }
+});
+
 // Untuk pengembangan lokal
 if (process.env.NODE_ENV !== 'production') {
   const PORT = process.env.PORT || 3000;
@@ -629,3 +667,4 @@ if (process.env.NODE_ENV !== 'production') {
 
 // Export untuk Vercel
 module.exports = app;
+//end of api/index.js

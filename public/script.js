@@ -1,3 +1,4 @@
+// public/script.js
 $(document).ready(function () {
   // Set minimum date untuk date picker
   const today = new Date();
@@ -450,3 +451,5 @@ $(document).ready(function () {
   // Mulai update timer
   startTimerUpdate();
 });
+
+// end of public/script.js
