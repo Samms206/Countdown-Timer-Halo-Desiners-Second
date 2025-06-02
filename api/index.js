@@ -1,5 +1,5 @@
 //api/index.js
-// Load environment variables for local development
+
 if (process.env.NODE_ENV !== 'production') {
   require('dotenv').config();
 }
@@ -13,9 +13,6 @@ const { v4: uuidv4 } = require('uuid');
 const Redis = require('ioredis');
 
 const app = express();
-
-// Inisialisasi Redis client dengan URL dari variabel lingkungan
-// Enhanced Redis configuration for Vercel + Upstash
 const redisConfig = {
   maxRetriesPerRequest: 3,
   retryDelayOnFailover: 100,
@@ -24,7 +21,7 @@ const redisConfig = {
   lazyConnect: true
 };
 
-// Add TLS config untuk Upstash
+
 if (process.env.REDIS_URL?.includes('rediss://')) {
   redisConfig.tls = {};
 }
@@ -33,7 +30,7 @@ console.log('Connecting to Redis with URL:', process.env.REDIS_URL ? 'URL provid
 
 const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', redisConfig);
 
-// Enhanced Redis event listeners
+
 redis.on('connect', () => {
   console.log('✅ Redis connected successfully');
 });
@@ -45,14 +42,14 @@ redis.on('ready', () => {
 redis.on('error', (err) => {
   console.error('❌ Redis connection error:', err.message);
 });
-// Middlewares
+
 app.use(cors({
   origin: '*',
   methods: ['GET', 'POST', 'OPTIONS', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-// CORS middleware
+
 app.use(function(req, res, next) {
   res.header("Access-Control-Allow-Origin", "*");
   res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
@@ -67,22 +64,15 @@ app.use(function(req, res, next) {
 app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, '../public')));
 
-// Kunci Redis
 const TIMER_KEY = 'timer_data_second';
-
-// Fungsi helper untuk mendapatkan data
 async function getData() {
-  try {
-    // Coba mendapatkan data dari Redis
+  try {  
     const dataStr = await redis.get(TIMER_KEY);
-    
-    // Jika data tidak ada, inisialisasi dengan nilai default
     if (!dataStr) {
       const defaultData = { 
         endTime: null,
         scheduledTimers: []
-      };
-      
+      };  
       await redis.set(TIMER_KEY, JSON.stringify(defaultData));
       return defaultData;
     }
@@ -90,7 +80,7 @@ async function getData() {
     return JSON.parse(dataStr);
   } catch (error) {
     console.error('Error getting data from Redis:', error);
-    // Kembalikan data default jika terjadi error
+    
     return { 
       endTime: null,
       scheduledTimers: []
@@ -98,7 +88,6 @@ async function getData() {
   }
 }
 
-// Fungsi helper untuk menyimpan data
 async function saveData(data) {
   try {
     await redis.set(TIMER_KEY, JSON.stringify(data));
@@ -109,33 +98,33 @@ async function saveData(data) {
   }
 }
 
-// Mendapatkan status timer saat ini
+
 app.get('/api/timer', async (req, res) => {
   try {
     console.log('Timer status request received');
     const data = await getData();
     
-    // Check for scheduled timers that need to be activated
+    
     const now = Date.now();
     let dataModified = false;
     
     if (data.scheduledTimers && data.scheduledTimers.length > 0) {
-      // Process each scheduled timer
+      
       for (let i = 0; i < data.scheduledTimers.length; i++) {
         const schedule = data.scheduledTimers[i];
         
-        // Migrasi data - Konversi dari format lama (active) ke format baru (status)
+        (status)
         if (schedule.status === undefined) {
           if (schedule.active === true) {
             data.scheduledTimers[i].status = 'activated';
-            data.scheduledTimers[i].activatedAt = now - 5000; // Anggap diaktifkan beberapa detik yang lalu
+            data.scheduledTimers[i].activatedAt = now - 5000; 
           } else {
             if (schedule.startAt <= now) {
-              // Jadwal yang sudah lewat waktunya
+              
               data.scheduledTimers[i].status = 'expired';
               data.scheduledTimers[i].expiredAt = now;
             } else {
-              // Jadwal yang belum waktunya
+              
               data.scheduledTimers[i].status = 'pending';
             }
           }
@@ -143,13 +132,11 @@ app.get('/api/timer', async (req, res) => {
           console.log(`Migrated schedule ${schedule.id} to new format with status: ${data.scheduledTimers[i].status}`);
         }
         
-        // Skip jadwal yang sudah expired atau completed
+        
         if (schedule.status === 'expired' || schedule.status === 'completed') {
           continue;
         }
         
-        // PERBAIKAN: Jadwal yang waktunya sudah lewat tanpa pernah diaktifkan
-        // Hanya ditandai expired jika sudah lewat 24 jam, bukan jika ada timer aktif
         if (schedule.status === 'pending' && schedule.startAt <= now - (24 * 60 * 60 * 1000)) {
           console.log(`Marking very old schedule ${schedule.id} as expired`);
           data.scheduledTimers[i].status = 'expired';
@@ -158,7 +145,7 @@ app.get('/api/timer', async (req, res) => {
           continue;
         }
         
-        // Jika timer aktif sudah berakhir, tandai jadwal yang aktif sebagai completed
+        completed
         if (schedule.status === 'activated' && data.endTime && now >= data.endTime) {
           console.log(`Marking activated schedule ${schedule.id} as completed`);
           data.scheduledTimers[i].status = 'completed';
@@ -167,17 +154,17 @@ app.get('/api/timer', async (req, res) => {
           continue;
         }
         
-        // PERBAIKAN: Jika jadwal perlu diaktifkan sekarang
-        // Aktifkan jadwal baru dan nonaktifkan timer yang lama jika ada
+        
+        
         if (schedule.status === 'pending' && schedule.startAt <= now) {
           console.log(`Activating scheduled timer ${schedule.id}`);
           
-          // Jika sudah ada timer aktif, catat untuk logging
+          
           if (data.endTime) {
             const oldEndTime = new Date(data.endTime).toISOString();
             console.log(`Replacing existing timer that would end at ${oldEndTime}`);
             
-            // Mark any other active schedules as completed
+            
             for (let j = 0; j < data.scheduledTimers.length; j++) {
               if (i !== j && data.scheduledTimers[j].status === 'activated') {
                 console.log(`Marking previously activated schedule ${data.scheduledTimers[j].id} as completed`);
@@ -187,25 +174,23 @@ app.get('/api/timer', async (req, res) => {
             }
           }
           
-          // Calculate end time based on duration
+          
           const endTime = now + (schedule.duration * 60 * 60 * 1000);
           data.endTime = endTime;
           
-          // Mark this schedule as activated
+          
           data.scheduledTimers[i].status = 'activated';
           data.scheduledTimers[i].activatedAt = now;
           dataModified = true;
         }
       }
-      
-      // Hapus jadwal completed yang sudah lebih dari 1 menit
       const originalLength = data.scheduledTimers.length;
       data.scheduledTimers = data.scheduledTimers.filter(schedule => {
-        // Hapus jadwal completed yang sudah lebih dari 1 menit
+        
         if (schedule.status === 'completed' && schedule.completedAt && (now - schedule.completedAt > 60000)) {
-          return false; // Hapus dari array
+          return false; 
         }
-        return true; // Pertahankan dalam array
+        return true; 
       });
       
       if (data.scheduledTimers.length < originalLength) {
@@ -214,13 +199,13 @@ app.get('/api/timer', async (req, res) => {
       }
     }
     
-    // Simpan perubahan jika ada
+    
     if (dataModified) {
       console.log('Saving modified data');
       await saveData(data);
     }
     
-    // Check if there's an active timer
+    
     if (!data.endTime) {
       console.log('No active timer found');
       return res.json({ 
@@ -233,10 +218,10 @@ app.get('/api/timer', async (req, res) => {
     
     const endTime = data.endTime;
     
-    // Jika timer sudah berakhir
+    
     if (now >= endTime) {
       console.log('Timer has ended, resetting');
-      // Reset timer
+      
       data.endTime = null;
       await saveData(data);
       
@@ -248,7 +233,7 @@ app.get('/api/timer', async (req, res) => {
       });
     }
     
-    // Hitung sisa waktu
+    
     const remainingTime = endTime - now;
     const hours = Math.floor(remainingTime / (1000 * 60 * 60));
     const minutes = Math.floor((remainingTime % (1000 * 60 * 60)) / (1000 * 60));
@@ -273,19 +258,19 @@ app.get('/api/timer', async (req, res) => {
   }
 });
 
-// Set timer baru secara manual
+
 app.post('/api/timer', async (req, res) => {
   try {
     console.log('Manual timer update request received:', req.body);
     const { hours, password } = req.body;
     
-    // Verifikasi password
+    
     if (password !== 'HDberkah2025') {
       console.log('Password verification failed');
       return res.status(403).json({ error: 'Password salah' });
     }
     
-    // Validasi input jam
+    
     const hoursNum = parseInt(hours);
     if (isNaN(hoursNum) || hoursNum <= 0) {
       console.log('Invalid hours value:', hours);
@@ -293,14 +278,14 @@ app.post('/api/timer', async (req, res) => {
     }
     
     console.log('Calculating end time for', hoursNum, 'hours');
-    // Hitung waktu akhir
+    
     const endTime = Date.now() + (hoursNum * 60 * 60 * 1000);
     
-    // Baca data sebelum mengubah
+    
     const data = await getData();
     data.endTime = endTime;
     
-    // Simpan ke Redis
+    
     try {
       console.log('Attempting to save data to Redis');
       const saveResult = await saveData(data);
@@ -327,20 +312,20 @@ app.post('/api/timer', async (req, res) => {
   }
 });
 
-// Tambahkan timer terjadwal
-// Tambahkan timer terjadwal
+
+
 app.post('/api/schedule', async (req, res) => {
   try {
     console.log('Schedule timer request received:', req.body);
     const { timestamp, startDate, startTime, duration, password, timezone } = req.body;
     
-    // Verifikasi password
+    
     if (password !== 'HDberkah2025') {
       console.log('Password verification failed');
       return res.status(403).json({ error: 'Password salah' });
     }
     
-    // Validasi input
+    
     if (!duration) {
       console.log('Missing required fields');
       return res.status(400).json({ error: 'Durasi harus diisi' });
@@ -352,47 +337,46 @@ app.post('/api/schedule', async (req, res) => {
       return res.status(400).json({ error: 'Durasi harus berupa angka positif' });
     }
     
-    // PERBAIKAN TIMEZONE: Prioritaskan timestamp dari client
+    
     let startAt;
     
     if (timestamp && !isNaN(parseInt(timestamp))) {
-      // Gunakan timestamp yang dikirim client (SOLUSI UTAMA)
+      
       startAt = parseInt(timestamp);
       console.log(`Using client timestamp: ${startAt}`);
       console.log(`Equivalent to UTC: ${new Date(startAt).toUTCString()}`);
       console.log(`Equivalent to ISO: ${new Date(startAt).toISOString()}`);
     } 
     else if (startDate && startTime) {
-      // Fallback jika tidak ada timestamp
+      
       console.log('No timestamp provided, using date components');
       
-      // Parse tanggal dan waktu
+      
       const [year, month, day] = startDate.split('-').map(Number);
       const [hours, minutes] = startTime.split(':').map(Number);
       
-      // Mendapatkan timezone offset dari client atau gunakan default
+      
       const timezoneOffset = timezone !== undefined ? parseInt(timezone) : 0;
       
-      // Gunakan Date.UTC untuk konsistensi
-      // Konversi dari waktu lokal client ke UTC dengan memperhitungkan timezone offset
+      
+
       const offsetHours = Math.floor(Math.abs(timezoneOffset) / 60);
       const offsetMinutes = Math.abs(timezoneOffset) % 60;
-      
-      // Jika timezone negatif (GMT+), kurangkan dari waktu lokal untuk mendapatkan UTC
-      // Jika timezone positif (GMT-), tambahkan ke waktu lokal untuk mendapatkan UTC
+
+
       let utcHours, utcMinutes;
       
       if (timezoneOffset <= 0) {
-        // Timezone GMT+ (seperti Asia)
+        
         utcHours = hours - offsetHours;
         utcMinutes = minutes - offsetMinutes;
       } else {
-        // Timezone GMT- (seperti Amerika)
+        
         utcHours = hours + offsetHours;
         utcMinutes = minutes + offsetMinutes;
       }
       
-      // Handle overflow
+      
       while (utcMinutes < 0) { utcMinutes += 60; utcHours -= 1; }
       while (utcMinutes >= 60) { utcMinutes -= 60; utcHours += 1; }
       
@@ -400,11 +384,11 @@ app.post('/api/schedule', async (req, res) => {
       let utcMonth = month - 1;
       let utcYear = year;
       
-      // Handle day overflow
+      
       while (utcHours < 0) { utcHours += 24; utcDay -= 1; }
       while (utcHours >= 24) { utcHours -= 24; utcDay += 1; }
       
-      // Calculate UTC timestamp
+      
       startAt = Date.UTC(utcYear, utcMonth, utcDay, utcHours, utcMinutes, 0, 0);
       
       console.log(`Computed UTC timestamp from components: ${startAt}`);
@@ -414,12 +398,12 @@ app.post('/api/schedule', async (req, res) => {
       return res.status(400).json({ error: 'Data waktu tidak lengkap' });
     }
     
-    // Validasi bahwa tanggal tidak di masa lalu
+    
     if (startAt <= Date.now()) {
       return res.status(400).json({ error: 'Tanggal dan waktu harus di masa depan' });
     }
     
-    // Logging info
+    
     console.log('DEBUG INFO:');
     console.log(`Input date/time: ${startDate} ${startTime}`);
     console.log(`Client timezone offset: ${timezone} minutes`);
@@ -429,24 +413,24 @@ app.post('/api/schedule', async (req, res) => {
     console.log(`Final startAt local server time: ${new Date(startAt).toString()}`);
     console.log(`Duration: ${durationNum} hours`);
     
-    // Baca data yang ada
+    
     const data = await getData();
     
-    // Inisialisasi array scheduledTimers jika belum ada
+    
     if (!data.scheduledTimers) {
       data.scheduledTimers = [];
     }
     
-    // Tambahkan jadwal baru
+    
     const newSchedule = {
       id: uuidv4(),
       startAt: startAt,
-      // Simpan juga timestamp untuk kompatibilitas
+      
       timestamp: startAt,
       duration: durationNum,
       status: 'pending',
       createdAt: Date.now(),
-      // Simpan data asli untuk referensi
+      
       rawDate: startDate,
       rawTime: startTime,
       timezoneOffset: timezone
@@ -454,7 +438,7 @@ app.post('/api/schedule', async (req, res) => {
     
     data.scheduledTimers.push(newSchedule);
     
-    // Simpan ke Redis
+    
     const saveResult = await saveData(data);
     
     if (!saveResult) {
@@ -463,7 +447,7 @@ app.post('/api/schedule', async (req, res) => {
     
     console.log('Schedule saved successfully:', newSchedule);
     
-    // Tambahkan informasi tambahan ke respons
+    
     res.json({
       success: true,
       savedTimestamp: startAt,
@@ -481,41 +465,41 @@ app.post('/api/schedule', async (req, res) => {
   }
 });
 
-// Mendapatkan daftar jadwal yang belum completed
+
 app.get('/api/schedules', async (req, res) => {
   try {
     console.log('Fetching schedules');
     
     const data = await getData();
     
-    // Filter jadwal yang belum completed
+    
     const now = Date.now();
     
-    // Aktifkan jadwal yang waktunya sudah lewat namun masih pending
+    
     let dataModified = false;
     if (data.scheduledTimers) {
       for (let i = 0; i < data.scheduledTimers.length; i++) {
         const schedule = data.scheduledTimers[i];
         
-        // Migrasi data - konversi dari format lama ke format baru
+        
         if (schedule.status === undefined) {
           if (schedule.active === true) {
             schedule.status = 'activated';
             dataModified = true;
           } else if (schedule.startAt <= now) {
-            // PERBAIKAN: Cek jika jadwal masih baru (kurang dari 24 jam)
+            
             if (now - schedule.startAt < 24 * 60 * 60 * 1000) {
-              // Aktifkan jadwal jika masih baru
+              
               console.log(`Activating pending schedule ${schedule.id} from /api/schedules`);
               
-              // Hitung waktu akhir
+              
               const endTime = now + (schedule.duration * 60 * 60 * 1000);
               data.endTime = endTime;
               
               schedule.status = 'activated';
               schedule.activatedAt = now;
             } else {
-              // Tandai expired jika sudah lebih dari 24 jam
+              
               schedule.status = 'expired';
             }
             dataModified = true;
@@ -524,18 +508,18 @@ app.get('/api/schedules', async (req, res) => {
             dataModified = true;
           }
         }
-        // PERBAIKAN: Periksa jadwal pending yang waktunya sudah lewat
+        
         else if (schedule.status === 'pending' && schedule.startAt <= now) {
-          // Hanya aktifkan jika belum lewat 24 jam
+          
           if (now - schedule.startAt < 24 * 60 * 60 * 1000) {
             console.log(`Activating pending schedule ${schedule.id} from /api/schedules`);
             
-            // Jika sudah ada timer aktif, catat untuk logging
+            
             if (data.endTime) {
               const oldEndTime = new Date(data.endTime).toISOString();
               console.log(`Replacing existing timer that would end at ${oldEndTime}`);
               
-              // Mark any other active schedules as completed
+              
               for (let j = 0; j < data.scheduledTimers.length; j++) {
                 if (i !== j && data.scheduledTimers[j].status === 'activated') {
                   console.log(`Marking previously activated schedule ${data.scheduledTimers[j].id} as completed`);
@@ -545,7 +529,7 @@ app.get('/api/schedules', async (req, res) => {
               }
             }
             
-            // Hitung waktu akhir
+            
             const endTime = now + (schedule.duration * 60 * 60 * 1000);
             data.endTime = endTime;
             
@@ -553,7 +537,7 @@ app.get('/api/schedules', async (req, res) => {
             schedule.activatedAt = now;
             dataModified = true;
           } else {
-            // Tandai expired jika sudah lebih dari 24 jam
+            
             schedule.status = 'expired';
             schedule.expiredAt = now;
             dataModified = true;
@@ -563,7 +547,7 @@ app.get('/api/schedules', async (req, res) => {
       }
     }
     
-    // Simpan perubahan jika ada
+    
     if (dataModified) {
       console.log('Saving modified data from /api/schedules');
       await saveData(data);
@@ -587,13 +571,13 @@ app.get('/api/schedules', async (req, res) => {
   }
 });
 
-// Hapus jadwal tertentu
+
 app.delete('/api/schedule/:id', async (req, res) => {
   try {
     console.log(`Delete schedule request for ID: ${req.params.id}`);
     const { password } = req.query;
     
-    // Verifikasi password
+    
     if (password !== 'HDberkah2025') {
       console.log('Password verification failed');
       return res.status(403).json({ error: 'Password salah' });
@@ -601,16 +585,16 @@ app.delete('/api/schedule/:id', async (req, res) => {
     
     const scheduleId = req.params.id;
     
-    // Baca data yang ada
+    
     const data = await getData();
     
-    // Filter out the schedule to delete
+    
     if (data.scheduledTimers) {
       const originalLength = data.scheduledTimers.length;
       data.scheduledTimers = data.scheduledTimers.filter(schedule => schedule.id !== scheduleId);
       
       if (data.scheduledTimers.length < originalLength) {
-        // Simpan data yang diperbarui
+        
         const saveResult = await saveData(data);
         
         if (!saveResult) {
@@ -635,30 +619,212 @@ app.delete('/api/schedule/:id', async (req, res) => {
   }
 });
 
-// Add health check endpoint
+
+
 app.get('/health', async (req, res) => {
   try {
-    // Test Redis connection
+    
     await redis.ping();
     
+    
+    const redisInfo = await redis.info();
+    const redisConfig = redis.options;
+    
+    
+    const allKeys = await redis.keys('*');
+    
+    
+    const timerData = await getData();
+    
+    
+    const memoryInfo = await redis.info('memory');
+    
+    
+    const serverInfo = await redis.info('server');
+    
+    
+    const clientInfo = await redis.info('clients');
+    
+    
+    const dbSize = await redis.dbsize();
+    
+    
+    const keyInfo = {};
+    for (const key of allKeys) {
+      try {
+        const type = await redis.type(key);
+        const ttl = await redis.ttl(key);
+        const size = await redis.memory('usage', key);
+        
+        keyInfo[key] = {
+          type: type,
+          ttl: ttl === -1 ? 'no expiry' : `${ttl} seconds`,
+          memoryUsage: `${size} bytes`,
+          exists: await redis.exists(key)
+        };
+        
+        
+        if (key === TIMER_KEY) {
+          keyInfo[key].data = await redis.get(key);
+          try {
+            keyInfo[key].parsedData = JSON.parse(keyInfo[key].data);
+          } catch (e) {
+            keyInfo[key].parseError = e.message;
+          }
+        }
+      } catch (keyError) {
+        keyInfo[key] = { error: keyError.message };
+      }
+    }
+    
+    
+    const parseRedisInfo = (infoString) => {
+      const lines = infoString.split('\r\n');
+      const result = {};
+      let currentSection = 'general';
+      
+      for (const line of lines) {
+        if (line.startsWith('# ')) {
+          currentSection = line.substring(2).toLowerCase();
+          result[currentSection] = {};
+        } else if (line.includes(':')) {
+          const [key, value] = line.split(':');
+          if (!result[currentSection]) result[currentSection] = {};
+          result[currentSection][key] = value;
+        }
+      }
+      return result;
+    };
+    
+    const parsedRedisInfo = parseRedisInfo(redisInfo);
+    const parsedMemoryInfo = parseRedisInfo(memoryInfo);
+    const parsedServerInfo = parseRedisInfo(serverInfo);
+    const parsedClientInfo = parseRedisInfo(clientInfo);
+    
     res.json({ 
-      status: 'OK', 
+      status: 'OK',
       timestamp: new Date().toISOString(),
-      redis: 'connected',
-      env: process.env.NODE_ENV,
-      timerKey: TIMER_KEY
+      
+      
+      environment: {
+        nodeEnv: process.env.NODE_ENV,
+        port: process.env.PORT,
+        redisUrl: process.env.REDIS_URL ? 'configured' : 'not configured',
+        redisUrlType: process.env.REDIS_URL?.includes('rediss://') ? 'secure (TLS)' : 'standard'
+      },
+      
+      
+      redis: {
+        status: 'connected',
+        host: redisConfig.host,
+        port: redisConfig.port,
+        db: redisConfig.db || 0,
+        family: redisConfig.family,
+        connectTimeout: redisConfig.connectTimeout,
+        lazyConnect: redisConfig.lazyConnect,
+        maxRetriesPerRequest: redisConfig.maxRetriesPerRequest,
+        retryDelayOnFailover: redisConfig.retryDelayOnFailover,
+        enableReadyCheck: redisConfig.enableReadyCheck,
+        maxLoadTimeout: redisConfig.maxLoadTimeout
+      },
+      
+      
+      database: {
+        totalKeys: allKeys.length,
+        databaseSize: dbSize,
+        timerKey: TIMER_KEY,
+        allKeys: allKeys,
+        keyDetails: keyInfo
+      },
+      
+      
+      applicationData: {
+        timerData: timerData,
+        activeTimer: timerData.endTime ? {
+          endTime: timerData.endTime,
+          endTimeFormatted: new Date(timerData.endTime).toISOString(),
+          remainingMs: Math.max(0, timerData.endTime - Date.now()),
+          isActive: timerData.endTime > Date.now()
+        } : null,
+        scheduledTimers: {
+          total: timerData.scheduledTimers?.length || 0,
+          pending: timerData.scheduledTimers?.filter(s => s.status === 'pending').length || 0,
+          activated: timerData.scheduledTimers?.filter(s => s.status === 'activated').length || 0,
+          completed: timerData.scheduledTimers?.filter(s => s.status === 'completed').length || 0,
+          expired: timerData.scheduledTimers?.filter(s => s.status === 'expired').length || 0,
+          details: timerData.scheduledTimers || []
+        }
+      },
+      
+      
+      serverInfo: {
+        version: parsedServerInfo.server?.redis_version,
+        mode: parsedServerInfo.server?.redis_mode,
+        os: parsedServerInfo.server?.os,
+        arch: parsedServerInfo.server?.arch_bits,
+        multiplexingApi: parsedServerInfo.server?.multiplexing_api,
+        uptime: parsedServerInfo.server?.uptime_in_seconds,
+        uptimeHuman: parsedServerInfo.server?.uptime_in_days
+      },
+      
+      
+      memoryInfo: {
+        usedMemory: parsedMemoryInfo.memory?.used_memory,
+        usedMemoryHuman: parsedMemoryInfo.memory?.used_memory_human,
+        usedMemoryPeak: parsedMemoryInfo.memory?.used_memory_peak,
+        usedMemoryPeakHuman: parsedMemoryInfo.memory?.used_memory_peak_human,
+        totalSystemMemory: parsedMemoryInfo.memory?.total_system_memory,
+        totalSystemMemoryHuman: parsedMemoryInfo.memory?.total_system_memory_human,
+        maxMemory: parsedMemoryInfo.memory?.maxmemory,
+        maxMemoryHuman: parsedMemoryInfo.memory?.maxmemory_human
+      },
+      
+      
+      clientInfo: {
+        connectedClients: parsedClientInfo.clients?.connected_clients,
+        clientRecentMaxInputBuffer: parsedClientInfo.clients?.client_recent_max_input_buffer,
+        clientRecentMaxOutputBuffer: parsedClientInfo.clients?.client_recent_max_output_buffer
+      },
+      
+      
+      rawRedisInfo: {
+        full: parsedRedisInfo,
+        memory: parsedMemoryInfo,
+        server: parsedServerInfo,
+        clients: parsedClientInfo
+      }
     });
+    
   } catch (error) {
     console.error('Health check failed:', error);
+    
+    
     res.status(500).json({ 
-      status: 'ERROR', 
+      status: 'ERROR',
+      timestamp: new Date().toISOString(),
       error: error.message,
-      redis: 'disconnected'
+      stack: error.stack,
+      
+      environment: {
+        nodeEnv: process.env.NODE_ENV,
+        port: process.env.PORT,
+        redisUrl: process.env.REDIS_URL ? 'configured' : 'not configured'
+      },
+      
+      redis: {
+        status: 'disconnected',
+        error: error.message
+      },
+      
+      database: {
+        status: 'unavailable',
+        timerKey: TIMER_KEY
+      }
     });
   }
 });
 
-// Untuk pengembangan lokal
+
 if (process.env.NODE_ENV !== 'production') {
   const PORT = process.env.PORT || 3000;
   app.listen(PORT, () => {
@@ -666,6 +832,6 @@ if (process.env.NODE_ENV !== 'production') {
   });
 }
 
-// Export untuk Vercel
+
 module.exports = app;
 //end of api/index.js
